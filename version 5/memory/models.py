@@ -5,9 +5,7 @@ from dataclasses import dataclass
 
 
 class MicroCluster:
-    def __init__(self, time_stamp, database_id=None, desc='', weight=1, term_frequencies=None):
-        if term_frequencies is None:
-            self.term_frequencies = []
+    def __init__(self, time_stamp, database_id=None, desc='', weight=1, term_frequencies=None, term_flags={}):
         self.database_id = database_id
         self.memory_id = uuid.uuid4().hex
         self.n_observations = 1
@@ -15,7 +13,10 @@ class MicroCluster:
         self.merged_with = []
         self.weight = weight
         self.time_stamp = time_stamp
-        self.term_frequencies = term_frequencies
+        if term_frequencies is None:
+            self.term_frequencies = []
+        else:
+            self.term_frequencies = term_frequencies
 
     def compute_weight(self):
         pass
@@ -45,16 +46,42 @@ class MicroCluster:
         #     term = Term.select().where(Term.id == tf.term).limit(1).execute()[0]
         #     st += f'\n - Term \"{term.desc}\" has weight {tf.weight:.2f}.'
         # return st
+@dataclass
+class TermDictionary(dict):
+    def __init__(self):
+        super().__init__()
 
+    def add_term(self, term, term_obj):
+        self[term] = term_obj
 
+    def get_doc_freq(self, term):
+        return self[term].document_frequency
+        
+    
+    def get_term(self, term):
+        return self.get(term, None)
+    
+    def remove_term(self, term):
+        del self[term]
+    
+    def get_all_terms(self):
+        l = []
+        for term, term_obj in self.items():
+            l.append({term: term_obj.document_frequency})
+        return l
+    
+    def getSize(self):
+        return len(self)
+    
 @dataclass
 class Term:
-    def __init__(self, desc, document_frequency, database_id=None):
+    def __init__(self, token, timestep, document_frequency, weight=1, database_id=None):
         self.database_id = database_id
+        self.token = token
         self.memory_id = uuid.uuid4().hex
-        self.desc = desc
+        self.weight = Weight(weight)
         self.document_frequency = document_frequency
-
+        self.time_stamp = timestep
 
 # terms_dict = {}
 # sample_tokens = ['this', 'is', 'a', 'test', 'test']
@@ -65,13 +92,18 @@ class Term:
 #     else:
 #         terms_dict[sample_token].document_frequency += 1
 # print(1)
+@dataclass
 class TermFrequency:
-    def __init__(self, term_memory_id, time_stamp, weight, database_id=None):
+    def __init__(self, tf, term_ref, time_stamp, weight, term_flag=0, tf_idf=0, database_id=None):
         self.database_id = database_id
         self.memory_id = uuid.uuid4().hex
-        self.term = term_memory_id
+        self.term = term_ref
+        self.tf = tf
         self.time_stamp = time_stamp
         self.weight = weight
+        self.term_flag = term_flag
+        self.tf_idf = tf_idf
+        
 
     # def create_local(microcluster, term, timestep, weight):
     #     term_ = Term.find(term)
@@ -96,15 +128,15 @@ class TermFrequency:
     #     return f'{desc}: {self.weight} at Time {self.timestep} (Cluster {self.mc_id})'
 #
 #
-
+@dataclass
 class Weight:
-    def __init__(self, memory_id, weight, database_id=None):
+    def __init__(self, weight, database_id=None):
         self.database_id = database_id
-        self.memory_id = memory_id
+        self.memory_id = uuid.uuid4().hex
         self.weight = weight
 
     # def __str__(self):
     #     return f'{self.weight} at Time {self.timestep} (Cluster {self.mc_id})\n{self.desc}'
 
 
-__all__ = ['MicroCluster', 'Term', 'TermFrequency', 'drop_tables', 'create_tables']
+#__all__ = ['MicroCluster', 'TermDictionary', 'Term', 'TermFrequency', 'Weight', 'drop_tables', 'create_tables']

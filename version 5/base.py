@@ -1,9 +1,8 @@
-from .db import DATABASE
-from .db.db_models import *
 from peewee import fn
 from abc import ABC
 import numpy as np
 from datetime import datetime
+from memory.models import Weight, TermDictionary, MicroCluster, Term, TermFrequency
 
 class BaseModel(ABC):
     start_realtime = None
@@ -11,11 +10,13 @@ class BaseModel(ABC):
     n_observations = 0
     tfs = []
     
+    
     def __init__(self, fading_factor=0.0005, t_gab=100, auto_cleanup=True, use_realtime=False):
         self.fading_factor = fading_factor
         self.t_gab = t_gab
         self.auto_cleanup = auto_cleanup
         self.use_realtime = use_realtime
+        self.termDictionary = TermDictionary()
         
     def learn_one(self, *args, **kwargs):
         yield 'Not implemented!'
@@ -41,7 +42,7 @@ class BaseModel(ABC):
         return False
     
     def create_new(self, n_grams, timestep):
-        return self._create_new(n_grams, timestep)
+        return self._create_new_mc(n_grams, timestep)
     
     def fade_clusters(self, timestep, ignore_ids=[], greedy=False):
         return self._fade_clusters(timestep, ignore_ids=ignore_ids, greedy=greedy)
@@ -93,11 +94,23 @@ class BaseModel(ABC):
             return m_clusters[merge_with].id # Provide Cluster ID as prediction
         return mc_new.id # Provide new Cluster ID as prediction
     
-    def _create_new(self, n_grams, timestep):
-        mc_new = MicroCluster.create()
-        for term, frequency in n_grams.items(): 
-            tf_ = TermFrequency.create_local(mc=mc_new, term=term, timestep=timestep, weight=frequency)
-            self.tfs.append(tf_)
+
+    # creates a new micro-cluster
+    def _create_new_mc(self, n_grams, timestep):
+        term_frequencies = {}
+        for token, freq in n_grams.items():
+            term = self.termDictionary.get_term(token)
+            if term is None:
+                term = Term(token, 1)
+                self.termDictionary.add_term(term)
+            weight_tf = Weight(freq)
+            term_frequencies[token] = TermFrequency(term.memory_id, weight_tf, 1)
+            term.document_frequency += 1
+        weight_mc = Weight(1)
+        mc_new = MicroCluster(timestep, weight_mc, term_frequencies)
+        # for term, frequency in n_grams.items(): 
+        #     tf_ = TermFrequency.create_local(mc=mc_new, term=term, timestep=timestep, weight=frequency)
+        #     self.tfs.append(tf_)
         return mc_new
     
     def _merge_clusters(self, microcluster, other):
