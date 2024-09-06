@@ -7,6 +7,8 @@ import pandas as pd
 from collections import defaultdict
 from memory.models2 import Weight, TermDictionary, MicroCluster, Term, TermFrequency
 import psycopg2
+from sklearn.metrics.pairwise import cosine_similarity
+from union_find import find_clusters
 
 class BaseModel():
   
@@ -16,7 +18,7 @@ class BaseModel():
 
     
     
-    def __init__(self, conn, fading_factor=0.0005, t_gap=100, auto_cleanup=True, use_realtime=False):
+    def __init__(self, conn, fading_factor=0.0005, t_gap=500, auto_cleanup=True, use_realtime=False):
         self.fading_factor = fading_factor
         self.t_gap = t_gap
         self.auto_cleanup = auto_cleanup
@@ -27,6 +29,8 @@ class BaseModel():
         self.mcs_inactive = {}
         self.mcs_removed = {}
         self.conn = conn
+        self.d_merge = 0
+        self.n_merge = 0
         
     
     def create_new(self, n_grams, timestep):
@@ -60,9 +64,10 @@ class BaseModel():
         if len(n_grams) == 0:
             return None
         ## Create new MicroCluster
-        if timestep%10 == 0:
-          #self._cleanup()
-          self.update_database()
+        if timestep%200 == 0:
+          if len(self.microClusters) > 2:
+            self._cleanup(timestep)
+          #self.update_database()
         self._create_new_mc(n_grams, timestep)
         #return 1 # Provide new Cluster ID as prediction
     
@@ -108,14 +113,20 @@ class BaseModel():
             
     '''This function calculates cosine similarity and returns dist and the id of the closest mc'''
     def calculate_similarity(self, tf_new, tf_matrix, ids):
-      tfidf_new = np.array(tf_new)
-      tfidfmatrix = np.array(tf_matrix)
-      tfidf_new_norm = tfidf_new / np.linalg.norm(tfidf_new)
-      tfidfmatrix_norm = tfidfmatrix / np.linalg.norm(tfidfmatrix, axis=1)[:, np.newaxis]
-      cosine_similarities = np.dot(tfidfmatrix_norm, tfidf_new_norm)
-      min_distance_index = np.argmax(cosine_similarities)
-      threshold = self.calculate_threshold(cosine_similarities, min_distance_index)
-      return (1 - cosine_similarities[min_distance_index], ids[min_distance_index], threshold)
+        # Convert inputs to numpy arrays
+        tfidf_new = np.array(tf_new).reshape(1, -1)  # Ensure it's a 2D array (1 row)
+        tfidf_matrix = np.array(tf_matrix)  # Multiple rows matrix
+        
+        # Calculate cosine similarities between tf_new and each row in tf_matrix
+        cosine_similarities = cosine_similarity(tfidf_matrix, tfidf_new).flatten()
+        
+        # Find the index of the maximum similarity
+        min_distance_index = np.argmax(cosine_similarities)
+        
+        # Calculate a threshold based on the similarities
+        threshold = self.calculate_threshold(cosine_similarities, min_distance_index)
+        # Return 1 - max similarity, the corresponding id, and the threshold
+        return (1 - cosine_similarities[min_distance_index], ids[min_distance_index], threshold)
       
     '''This function merges mc_new to its closest mc which becomes its parent mc'''
     def mergeClusters(self, mc_new, mc_parent):
@@ -137,7 +148,7 @@ class BaseModel():
           new_wt = max(0,term_obj.weight.weight * (2 **(-self.fading_factor * (timestep - term_obj.time_stamp))))
           self.termDictionary[token].weight.weight  = new_wt
           
-    '''This function calculates tf_idf of the new mc and the existing mcs and calculates the cosine_similarity.
+    '''This function fades existing mcs , calculates tf_idf of the new mc, and the existing mcs and calculates the cosine_similarity.
         If dist< threshold, merge_clusters() is called. Else, mc_new is appended  to the list of mcs.
     '''
     def merge_if_eligible(self, mc_new, timestep):
@@ -166,6 +177,8 @@ class BaseModel():
       if minDist < tr:
         self.mcs_inactive[mc_new.memory_id] = mc_new
         self.mergeClusters(mc_new, mc_closest)
+        self.n_merge +=1
+        self.d_merge += minDist
       else:
         self.microClusters[mc_new.memory_id] = mc_new
 
@@ -234,31 +247,90 @@ class BaseModel():
     #   return 1 - cosine_sim_matrix
     
     '''This function removes irrelavant clusters after every 200 observations'''  
-    def _cleanup(self):
+    
+    def get_distance_matrix(self, tfidf_matrix):
+    # Calculate dot product similarity matrix
+      tfidm = np.array(tfidf_matrix)
+      if tfidf_matrix is not None and len(tfidf_matrix) > 0:
+        similarity_matrix = cosine_similarity(tfidm)
+        #print("here..",similarity_matrix)
+        return 1 - similarity_matrix
+      return []
+
+      
+    def create_tfidm(self, timestep):
+      tfidfmatrix = []
+      ids=[]
+      for id, mc in self.microClusters.items():
+          termFlags = mc.term_flags
+          mc_tfs = mc.term_frequencies
+          tf_idf = [int(mc_tfs[token].tf) / self.termDictionary.get_doc_freq(token) if termFlags[token]==1 else 0 
+                  for token, flag in termFlags.items()]
+          tfidfmatrix.append(tf_idf)
+          ids.append(id)
+      #print(tfidfmatrix)
+      return (tfidfmatrix,ids)
+     
+    def merge_similar_clusters(self, timestep):
+      tfidf_m , ids = self.create_tfidm(timestep)
+      dist_m = self.get_distance_matrix(tfidf_m)
+      dist_tr = self.d_merge / self.n_merge
+      print(dist_tr)
+      grouped_clusters_list = find_clusters(dist_m, ids, dist_tr)
+      #self.merge_grouped_mcs(grouped_clusters_list)
+      print(grouped_clusters_list)
+      #self.merge_clusters(grouped_clusters_list)
+      
+    def _cleanup(self, timestep):
       updated_mcs = {}
+      print("before..", len(self.microClusters))
+      self.merge_similar_clusters(timestep)
       for mc_id, mc in self.microClusters.items():
         if mc.weight.weight >= (2. ** (-self.fading_factor * self.t_gap)):
           updated_mcs[mc_id] = mc
         else:
           self.mcs_removed[mc_id] = mc
       self.microClusters = updated_mcs
+      print("after..",len(self.microClusters))
       # self.create_dist_matrix()
-      #self.remove_terms()
+      self.remove_terms()
+    
+    def update_terms(self, cur):
+      update_terms = """
+      INSERT INTO term (term_id, term, doc_frequency, timestep, weight) 
+      VALUES (%s, %s, %s, %s)
+      ON CONFLICT (term_id) DO UPDATE
+      SET weight = EXCLUDED.weight, timestep = EXCLUDED.timestep, doc_frequency = EXCLUDED.doc_frequency;
+      """
+      insert_weight = ''''''
+      
+      # Filter active microclusters and insert them into the table
+      for term, term_obj in self.termDictionary.items():
+        cur.execute(update_terms, (term_obj.memory_id, term_obj.weight.weight, term_obj.time_stamp, term_obj.document_frequency))
+
+      # Commit the transaction
+      
+      self.conn.commit()
+      return 0
     
     def update_database(self):
       cur = self.conn.cursor()
-      insert_query = """
+      self.update_terms(cur)
+      update_mc = """
       INSERT INTO microcluster (mc_id, weight, timestep, active) 
       VALUES (%s, %s, %s, %s)
       ON CONFLICT (mc_id) DO UPDATE
       SET weight = EXCLUDED.weight, timestep = EXCLUDED.timestep, active = EXCLUDED.active;
       """
-
-      # Filter active microclusters and insert them into the table
+      insert_weight = '''INSERT INTO weight (mc_id, weight, timestep)'''
+      
+      # Insert active mcs into the table
       for mem_id, mc in self.microClusters.items():
-          if mc.active:
-              cur.execute(insert_query, (mc.memory_id, mc.weight.weight, mc.time_stamp, mc.active))
-
+              #update the term
+              cur.execute(update_mc, (mc.memory_id, mc.weight.weight, mc.time_stamp, True))
+      # Insert expired mcs into the table
+      for mem_id, mc in self.mcs_removed.items():
+              cur.execute(update_mc, (mc.memory_id, mc.weight.weight, mc.time_stamp, False))
       # Commit the transaction
       
       self.conn.commit()
