@@ -68,6 +68,8 @@ class BaseModel():
           if len(self.microClusters) > 2:
             self._cleanup(timestep)
           #self.update_database()
+        if timestep%7999 == 0:
+          print(timestep,"       ",len(self.microClusters))
         self._create_new_mc(n_grams, timestep)
         #return 1 # Provide new Cluster ID as prediction
     
@@ -141,6 +143,7 @@ class BaseModel():
         else:
           mc_parent.term_frequencies[token] = tf_new
       mc_new.merged_with = mc_parent.memory_id
+      mc_new.active = False
     
     def fade_terms(self, curr_tokens, timestep):
       for token, term_obj in self.termDictionary.items():
@@ -175,7 +178,7 @@ class BaseModel():
       minDist, minDistIndex, tr = self.calculate_similarity(tfidf_new,tfidfmatrix, ids)
       mc_closest = self.microClusters[minDistIndex]
       if minDist < tr:
-        self.mcs_inactive[mc_new.memory_id] = mc_new
+        #self.mcs_inactive[mc_new.memory_id] = mc_new
         self.mergeClusters(mc_new, mc_closest)
         self.n_merge +=1
         self.d_merge += minDist
@@ -271,14 +274,25 @@ class BaseModel():
       #print(tfidfmatrix)
       return (tfidfmatrix,ids)
      
+    def merge_grouped_mcs(self, groups):
+      for group in groups:
+        if len(group) > 1:
+          min_timestep_id = min(group, key=lambda id: self.microClusters[id].time_stamp)
+          for id in group:
+            if id != min_timestep_id:
+              self.mergeClusters(self.microClusters[min_timestep_id], self.microClusters[id])
+              self.mcs_inactive[id] = self.microClusters[id]
+              del self.microClusters[id]
+          print("inactive mcs->", len(self.mcs_inactive))
+    
     def merge_similar_clusters(self, timestep):
       tfidf_m , ids = self.create_tfidm(timestep)
       dist_m = self.get_distance_matrix(tfidf_m)
       dist_tr = self.d_merge / self.n_merge
-      print(dist_tr)
+      #print(dist_tr)
       grouped_clusters_list = find_clusters(dist_m, ids, dist_tr)
-      #self.merge_grouped_mcs(grouped_clusters_list)
-      print(grouped_clusters_list)
+      self.merge_grouped_mcs(grouped_clusters_list)
+      #print(grouped_clusters_list)
       #self.merge_clusters(grouped_clusters_list)
       
     def _cleanup(self, timestep):
@@ -291,7 +305,7 @@ class BaseModel():
         else:
           self.mcs_removed[mc_id] = mc
       self.microClusters = updated_mcs
-      print("after..",len(self.microClusters))
+      print("after..",timestep,"       ",len(self.microClusters))
       # self.create_dist_matrix()
       self.remove_terms()
     

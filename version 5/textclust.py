@@ -281,14 +281,28 @@ _model = compose.Pipeline(
         TextClust(conn)
     )
 print("connected..")
-with open('/Users/soumitri/Desktop/Projects/Textclust/TextClust/rbook.json', 'r') as file:
-    climate_data = json.load(file)
-new_item = []
-for data in tqdm(climate_data):
-    value = data['text']
-    new_item.append(_clean_text(value))
 
-for data in tqdm(new_item[:2000]):
+climate_data = []
+with open('/Users/soumitri/Desktop/Projects/Textclust/TextClust/original.json', 'r') as file:
+    for line in file:
+        try:
+            json_object = json.loads(line)
+            climate_data.append(json_object)
+            #print(json_object)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON: {e}")
+
+
+new_item = []
+
+for data in tqdm(climate_data):
+    value = data.get("tweets", None)  # Use .get() to avoid KeyError
+    if value and value.strip():
+        new_item.append(_clean_text(value))
+
+
+
+for data in tqdm(new_item[:20000]):
     _model.predict_one(data)
 
 if conn is not None:
