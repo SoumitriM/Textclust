@@ -27,7 +27,6 @@ class BaseModel():
         self.microClusters = {}
         self.tfs = []
         self.mcs_inactive = {}
-        self.mcs_removed = {}
         self.conn = conn
         self.d_merge = 0
         self.n_merge = 0
@@ -42,11 +41,11 @@ class BaseModel():
     def microclusters(self, ignore_ids=[]):
         return self.microClusters(ignore_ids)
            
-    def step(self, n_grams, timestep):
-        return self._step(n_grams, timestep)
+    def step(self, n_grams, tweet_id, timestep):
+        return self._step(n_grams, tweet_id, timestep)
     
         
-    def _learn_one(self, n_grams, timestep=None, realtime=None):
+    def _learn_one(self, n_grams, tweet_id, timestep=None, realtime=None):
         ## Save starting time and compute timestep if missing
         if self.use_realtime:
             realtime = datetime.now() if realtime is None else realtime
@@ -57,9 +56,9 @@ class BaseModel():
         
         ## Increase counter and execute step
         self.n_observations += 1
-        return self.step(n_grams, timestep)
+        return self.step(n_grams,tweet_id, timestep)
         
-    def _step(self, n_grams, timestep):
+    def _step(self, n_grams, tweet_id, timestep):
         ## If n_grams is empty, don't make prediction
         if len(n_grams) == 0:
             return None
@@ -70,11 +69,11 @@ class BaseModel():
           #self.update_database()
         if timestep%7999 == 0:
           print(timestep,"       ",len(self.microClusters))
-        self._create_new_mc(n_grams, timestep)
+        self._create_new_mc(n_grams, tweet_id, timestep)
         #return 1 # Provide new Cluster ID as prediction
     
     
-    def _create_new_mc(self, n_grams, timestep):
+    def _create_new_mc(self, n_grams, tweet_id, timestep):
         term_frequencies = {}
         term_flags = {key: 0 for key in self.termDictionary}
         for token, freq in n_grams.items():
@@ -93,9 +92,10 @@ class BaseModel():
               
             term_flags[token] = 1
             tf = freq
-            term_frequencies[token] = TermFrequency(term_ref=term.memory_id, tf=tf)
+            term_frequencies[token] = TermFrequency(term_ref=term.memory_id, tf=tf, weight=1, time_stamp=timestep)
         weight_mc = Weight(weight=1)
-        mc_new = MicroCluster(time_stamp=timestep, weight=weight_mc, term_frequencies=term_frequencies, term_flags=term_flags, active=True)
+        tweet_id = [tweet_id]
+        mc_new = MicroCluster(time_stamp=timestep, weight=weight_mc, term_frequencies=term_frequencies,tweet_ids=tweet_id, term_flags=term_flags, active=True)
         if(len(self.microClusters) < 2):
           self.microClusters[mc_new.memory_id] = mc_new
         else:
@@ -132,14 +132,19 @@ class BaseModel():
       
     '''This function merges mc_new to its closest mc which becomes its parent mc'''
     def mergeClusters(self, mc_new, mc_parent):
+      new_t_ids = mc_new.tweet_ids
       mc_parent.n_observations += 1
       mc_parent.weight.weight += mc_new.weight.weight
       mc_parent.time_stamp = mc_new.time_stamp
+      mc_parent.tweet_ids += new_t_ids
       for key , val in mc_new.term_flags.items():
         mc_parent.term_flags[key] = mc_parent.term_flags[key] | val
       for token, tf_new in mc_new.term_frequencies.items():
         if token in mc_parent.term_frequencies:
-          mc_parent.term_frequencies[token].tf += tf_new.tf
+          tf_parent = mc_parent.term_frequencies[token]
+          tf_parent.tf += tf_new.tf
+          tf_parent.weight.weight += 1
+          tf_parent.time_stamp = max(tf_new.time_stamp, tf_parent.time_stamp)
         else:
           mc_parent.term_frequencies[token] = tf_new
       mc_new.merged_with = mc_parent.memory_id
@@ -151,6 +156,14 @@ class BaseModel():
           new_wt = max(0,term_obj.weight.weight * (2 **(-self.fading_factor * (timestep - term_obj.time_stamp))))
           self.termDictionary[token].weight.weight  = new_wt
           
+    def fade_tfs(self, curr_tokens, mc_id, timestep):
+      mc = self.microClusters[mc_id]
+      tfs = mc.term_frequencies
+      for token, term_obj in tfs.items():
+        if curr_tokens[token] == 0:
+          new_wt = max(0,term_obj.weight.weight * (2 **(-self.fading_factor * (timestep - term_obj.time_stamp))))
+          tfs[token].weight.weight  = new_wt
+          
     '''This function fades existing mcs , calculates tf_idf of the new mc, and the existing mcs and calculates the cosine_similarity.
         If dist< threshold, merge_clusters() is called. Else, mc_new is appended  to the list of mcs.
     '''
@@ -158,9 +171,9 @@ class BaseModel():
       tfidfmatrix = []
       ids=[]
       termFlagsNew = mc_new.term_flags
+      #fade terms globally
       self.fade_terms(termFlagsNew, timestep)
       tfNew = mc_new.term_frequencies
-      # self.fade_terms(termFlagsNew, timestep)
       tfidf_new = [int(tfNew[token].tf) / self.termDictionary.get_doc_freq(token) if flag else 0 
                   for token, flag in termFlagsNew.items()]
       fading_const = 2. ** (-self.fading_factor)
@@ -171,6 +184,9 @@ class BaseModel():
           mc.time_stamp = timestep
           termFlags = mc.term_flags
           mc_tfs = mc.term_frequencies
+          self.fade_tfs(termFlagsNew, id, timestep)
+          #if termFlags['pollution'] == 1:
+            #print("..tt", termFlags['pollution'])
           tf_idf = [int(mc_tfs[token].tf) / self.termDictionary.get_doc_freq(token) if termFlags[token]==1 else 0 
                   for token, flag in termFlags.items()]
           tfidfmatrix.append(tf_idf)
@@ -193,20 +209,20 @@ class BaseModel():
       return new_wt
       
     '''This function fades tfs after every 50 observations'''
-    def _fade_tfs(self, timestep, mc_tfs):
-        threshold_weight = 2. ** (-self.fading_factor * self.t_gap)
-        updated_mc_tfs = {}
-        for token, tf in mc_tfs.items():
-            new_wt = self.fade_weight(timestep, tf)
-            if (new_wt >= threshold_weight):
-              tf.time_stamp = timestep
-              updated_mc_tfs[token] = tf
-            else:
-              term = self.termDictionary.get_term(token)
-              term.weight.weight -= tf.tf
-              if (term.weight.weight <= 0):
-                self.termDictionary.remove_term(token)      
-        return updated_mc_tfs
+    # def _fade_tfs(self, timestep, mc_tfs):
+    #     threshold_weight = 2. ** (-self.fading_factor * self.t_gap)
+    #     updated_mc_tfs = {}
+    #     for token, tf in mc_tfs.items():
+    #         new_wt = self.fade_weight(timestep, tf)
+    #         if (new_wt >= threshold_weight):
+    #           tf.time_stamp = timestep
+    #           updated_mc_tfs[token] = tf
+    #         else:
+    #           term = self.termDictionary.get_term(token)
+    #           term.weight.weight -= tf.tf
+    #           if (term.weight.weight <= 0):
+    #             self.termDictionary.remove_term(token)      
+    #     return updated_mc_tfs
     
 
           
@@ -229,25 +245,13 @@ class BaseModel():
         # Delete expired_terms key-value pairs from self.termDictionary
         for term in expired_terms:
             del self.termDictionary[term]
-
-        # R
-        # emove expired terms key-value pairs from mc.tfs and mc.term_flags in one go
         for mc_id, mc in self.microClusters.items():
-            # Remove terms from both mc.tfs and mc.term_flags in one step
-            for term in expired_terms:
-                if term in mc.term_frequencies:
-                    del mc.term_frequencies[term]
-                if term in mc.term_flags:
-                    del mc.term_flags[term]
-    
-    # def create_dist_matrix(self):
-    #   tfidf_df = self.mc_df.copy(deep=False)
-    #   for token in tfidf_df.columns:
-    #     doc_freq = self.termDictionary.get_doc_freq(token)
-    #     tfidf_df[token] = tfidf_df[token] / doc_freq
-    #   tfidfm = csr_matrix(tfidf_df.values)
-    #   cosine_sim_matrix = cosine_similarity(tfidfm)
-    #   return 1 - cosine_sim_matrix
+          # Remove terms from both mc.tfs and mc.term_flags in one step
+          for term in expired_terms:
+            if term in mc.term_frequencies:
+              del mc.term_frequencies[term]
+            if term in mc.term_flags:
+              del mc.term_flags[term]
     
     '''This function removes irrelavant clusters after every 200 observations'''  
     
@@ -294,6 +298,19 @@ class BaseModel():
       self.merge_grouped_mcs(grouped_clusters_list)
       #print(grouped_clusters_list)
       #self.merge_clusters(grouped_clusters_list)
+    
+    def remove_tfs(self, mc):
+      tfs = mc.term_frequencies
+      updated_tfs = {}
+      for token, term_obj in tfs.items():
+        if term_obj.weight.weight >= (2. ** (-self.fading_factor * self.t_gap)):
+          updated_tfs[token] = term_obj
+          #mc.term_flags[token] = 0
+          #print(token, self.microClusters[mc_id].term_flags[token])
+        else:
+          mc.term_flags[token] = 0
+      mc.term_frequencies = updated_tfs
+      #return mc
       
     def _cleanup(self, timestep):
       updated_mcs = {}
@@ -301,13 +318,18 @@ class BaseModel():
       self.merge_similar_clusters(timestep)
       for mc_id, mc in self.microClusters.items():
         if mc.weight.weight >= (2. ** (-self.fading_factor * self.t_gap)):
+          #self.remove_tfs(mc)
           updated_mcs[mc_id] = mc
         else:
-          self.mcs_removed[mc_id] = mc
-      self.microClusters = updated_mcs
+          mc.active = False
+          self.mcs_inactive[mc_id] = mc
+      self.microClusters = updated_mcs    
       print("after..",timestep,"       ",len(self.microClusters))
       # self.create_dist_matrix()
       self.remove_terms()
+      print("terms total ->", len(self.termDictionary))
+      #self.update_database()
+      #self.update_database()
     
     def update_terms(self, cur):
       update_terms = """
@@ -329,24 +351,39 @@ class BaseModel():
     
     def update_database(self):
       cur = self.conn.cursor()
-      self.update_terms(cur)
-      update_mc = """
+      # self.update_term_table(cur)
+      # self.update_mc_weight_table(cur)
+      
+      update_mc_query = """
+      INSERT INTO microcluster (mc_id,  timestep, parent_id, tweets, active) 
+      VALUES (%s, %s, %s, %s, %s)
+      ON CONFLICT (mc_id) DO UPDATE
+      SET timestep = EXCLUDED.timestep, parent_id = EXCLUDED.parent_id, tweets = EXCLUDED.tweets, active = EXCLUDED.active;
+      """
+      update_tf_query = """
       INSERT INTO microcluster (mc_id, weight, timestep, active) 
       VALUES (%s, %s, %s, %s)
       ON CONFLICT (mc_id) DO UPDATE
-      SET weight = EXCLUDED.weight, timestep = EXCLUDED.timestep, active = EXCLUDED.active;
+      SET timestep = EXCLUDED.timestep, active = EXCLUDED.active;
       """
-      insert_weight = '''INSERT INTO weight (mc_id, weight, timestep)'''
       
+      insert_weight_query = """
+      INSERT INTO weight_mc (weight_id, weight, timestep, mc_id) 
+      VALUES (%s, %s, %s, %s);
+      """
       # Insert active mcs into the table
       for mem_id, mc in self.microClusters.items():
-              #update the term
-              cur.execute(update_mc, (mc.memory_id, mc.weight.weight, mc.time_stamp, True))
+        #update the tfs
+        #update the weights
+        weight = mc.weight
+        #cur.execute(insert_weight_query, (weight.memory_id, weight.weight, mc.time_stamp, mc.memory_id))
+        cur.execute(update_mc_query, (mc.memory_id, mc.time_stamp, mc.merged_with, mc.tweet_ids, True))
       # Insert expired mcs into the table
-      for mem_id, mc in self.mcs_removed.items():
-              cur.execute(update_mc, (mc.memory_id, mc.weight.weight, mc.time_stamp, False))
-      # Commit the transaction
-      
+      for mem_id, mc in self.mcs_inactive.items():
+          #update the tfs
+        weight = mc.weight
+        #cur.execute(insert_weight_query, (weight.memory_id, weight.weight, mc.time_stamp, mem_id))
+        cur.execute(update_mc_query, (mc.memory_id, mc.time_stamp, mc.merged_with, mc.tweet_ids, False))
       self.conn.commit()
       
       return 0

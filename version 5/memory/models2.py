@@ -5,17 +5,18 @@ from dataclasses import dataclass
 
 
 class MicroCluster:
-    def __init__(self, time_stamp, active=False, merged_with=None, database_id=None, desc='', weight=1, term_frequencies={}, term_flags={}):
+    def __init__(self, time_stamp, active=False, merged_with=None, database_id=None, tweet_ids=[], weight=1, term_frequencies={}, term_flags={}):
         self.database_id = database_id
         self.memory_id = uuid.uuid4().hex
         self.n_observations = 1
-        self.desc = desc
+        self.tweet_ids = tweet_ids
         self.merged_with = merged_with
         self.weight = weight
         self.time_stamp = time_stamp
         self.term_flags = term_flags
         self.term_frequencies = term_frequencies
         self.active = active
+        
 
     def compute_weight(self):
         pass
@@ -84,10 +85,12 @@ class Term:
 
 @dataclass
 class TermFrequency:
-    def __init__(self, tf, term_ref, tf_idf=0):
+    def __init__(self, tf, term_ref, weight, time_stamp, tf_idf=0):
         self.term = term_ref
         self.tf = tf
         self.tf_idf = tf_idf
+        self.weight = Weight(weight)
+        self.time_stamp = time_stamp
         
 
     # def create_local(microcluster, term, timestep, weight):
