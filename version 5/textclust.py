@@ -1,4 +1,4 @@
-from base_new2 import BaseModel
+from base import BaseModel
 from peewee import fn
 import numpy as np
 from numpy.linalg import norm as np_norm
@@ -71,7 +71,7 @@ feature_extractor = feature_extraction
 predictor = TextClust(conn)
 
 _model = CustomPipeline(feature_extractor, predictor)
-print("connected..")
+print("connected to database..")
 
 climate_data = [] 
 with open(file_path, 'r') as file:
@@ -79,7 +79,7 @@ with open(file_path, 'r') as file:
 
 new_item = []
 
-for data in tqdm(loaded_data):
+for data in tqdm(loaded_data[:1200]):
     value = data.get("tweets", None)
     tweet_id = data.get("tweet_id", None)
     if value and value.strip():
