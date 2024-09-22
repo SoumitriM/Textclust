@@ -88,6 +88,7 @@ for data in tqdm(loaded_data[:1200]):
         "tweet_id": tweet_id,
         "tweet": cleaned_tweet
     })
+
 for data in tqdm(new_item):
     _model.process(data)
 

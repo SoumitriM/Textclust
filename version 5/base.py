@@ -55,7 +55,7 @@ class BaseModel():
         if timestep%200 == 0:
           if len(self.microClusters) > 2:
             self._cleanup(timestep)
-            #self.update_database()
+            self.update_database()
         self.create_new_mc(n_grams, tweet_id, timestep)
         #return 1 # Provide new Cluster ID as prediction
     

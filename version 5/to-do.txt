@@ -1,0 +1,1 @@
+1. check for 0s. specially calculationg dmerge/ n if n=0
