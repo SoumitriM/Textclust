@@ -52,10 +52,12 @@ class BaseModel():
         if len(n_grams) == 0:
             return None
         ## Create new MicroCluster
+        if timestep%1 == 0:
+          self.update_database()
         if timestep%200 == 0:
           if len(self.microClusters) > 2:
             self._cleanup(timestep)
-            self.update_database()
+            #self.update_database()
         self.create_new_mc(n_grams, tweet_id, timestep)
         #return 1 # Provide new Cluster ID as prediction
     
@@ -75,7 +77,6 @@ class BaseModel():
               self.termDictionary[token].weight.weight += 1
               self.termDictionary[token].document_frequency += 1
               self.termDictionary[token].time_stamp = timestep
-              self.termDictionary[token].weight.weight += 1 
             term_flags[token] = 1
             tf = freq
             term_frequencies[token] = TermFrequency(term_ref=term.memory_id, tf=tf, weight=1, time_stamp=timestep)
@@ -102,6 +103,8 @@ class BaseModel():
     def calculate_similarity(self, tf_new, tf_matrix, ids):
         tfidf_new = np.array(tf_new).reshape(1, -1)  # Ensure it's a 2D array (1 row)
         tfidf_matrix = np.array(tf_matrix)  # Multiple rows matrix
+        rows, columns = tfidf_matrix.shape
+        #print(f"Shape of tfidf_matrix: {rows} rows, {columns} columns")
         cosine_similarities = cosine_similarity(tfidf_matrix, tfidf_new).flatten()
         min_distance_index = np.argmax(cosine_similarities)
         threshold = self.calculate_threshold(cosine_similarities, min_distance_index)
@@ -162,10 +165,13 @@ class BaseModel():
           termFlags = mc.term_flags
           mc_tfs = mc.term_frequencies
           self.fade_tfs(termFlagsNew, id, timestep)
-          tf_idf = [int(mc_tfs[token].tf) / self.termDictionary.get_doc_freq(token) if termFlags[token]==1 else 0 
-                  for token, flag in termFlags.items()]
+          tf_idf = [int(mc_tfs[term].tf) / self.termDictionary.get_doc_freq(term) if termFlags[term]==1 else 0 
+                  for term, termObj in self.termDictionary.items()]
+          ## append 0s to make tf_idf length the same as the length of termDictionary
+          #print(len(tf_idf))
           tfidfmatrix.append(tf_idf)
           ids.append(id)
+
       minDist, minDistIndex, tr = self.calculate_similarity(tfidf_new,tfidfmatrix, ids)
       mc_closest = self.microClusters[minDistIndex]
       if minDist < tr:
@@ -215,8 +221,9 @@ class BaseModel():
       for id, mc in self.microClusters.items():
           termFlags = mc.term_flags
           mc_tfs = mc.term_frequencies
-          tf_idf = [int(mc_tfs[token].tf) / self.termDictionary.get_doc_freq(token) if termFlags[token]==1 else 0 
-                  for token, flag in termFlags.items()]
+          tf_idf = [int(mc_tfs[term].tf) / self.termDictionary.get_doc_freq(term) if termFlags[term]==1 else 0 
+                  for term, termObj in self.termDictionary.items()]
+          ## add 0s for rest of term.dict.length
           tfidfmatrix.append(tf_idf)
           ids.append(id)
       return (tfidfmatrix,ids)

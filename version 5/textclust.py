@@ -73,23 +73,102 @@ predictor = TextClust(conn)
 _model = CustomPipeline(feature_extractor, predictor)
 print("connected to database..")
 
-climate_data = [] 
-with open(file_path, 'r') as file:
-    loaded_data = json.load(file)
+# climate_data = [] 
+# with open(file_path, 'r') as file:
+#     loaded_data = json.load(file)
 
 new_item = []
+loaded_data = [
+    {
+        "tweet_id": 12,
+        "tweet": "quick brown fox jumps sleepy cat woods"
+    },
+    {
+        "tweet_id": 20,
+        "tweet": "US election results influence future legislative decisions"
+    },
+    {
+        "tweet_id": 15,
+        "tweet": "fast red rabbit hops tired cat garden"
+    },
+    {
+        "tweet_id": 11,
+        "tweet": "global climate change affects agriculture across world regions"
+    },
+    {
+        "tweet_id": 19,
+        "tweet": "US election debates highlight important national concerns"
+    },
+    {
+        "tweet_id": 24,
+        "tweet": "quick brown fox runs tired hound river"
+    },
+    {
+        "tweet_id": 13,
+        "tweet": "swift gray wolf jumps lazy dog lake"
+    },
+    {
+        "tweet_id": 22,
+        "tweet": "global warming accelerates ice melting across polar regions"
+    },
+    {
+        "tweet_id": 16,
+        "tweet": "global warming drives extreme weather events across regions"
+    },
+    {
+        "tweet_id": 21,
+        "tweet": "US election campaigns focus swing states heavily"
+    },
+    {
+        "tweet_id": 17,
+        "tweet": "quick agile fox leaps lazy dog hill"
+    },
+    {
+        "tweet_id": 14,
+        "tweet": "US election candidates address key policy issues"
+    },
+    {
+        "tweet_id": 18,
+        "tweet": "global warming impacts marine life across world oceans"
+    },
+    {
+        "tweet_id": 23,
+        "tweet": "quick brown fox leaps lazy dog park"
+    },
+    {
+        "tweet_id": 25,
+        "tweet": "sunsets paint skies with vibrant colors"
+    },
+    {
+        "tweet_id": 26,
+        "tweet": "technology shapes our future every day"
+    },
+    {
+        "tweet_id": 27,
+        "tweet": "travel broadens horizons and enriches lives"
+    },
+    {
+        "tweet_id": 28,
+        "tweet": "music brings joy and connects people everywhere"
+    },
+    {
+        "tweet_id": 29,
+        "tweet": "healthy habits promote wellness and longevity"
+    }
+]
 
-for data in tqdm(loaded_data[:1200]):
-    value = data.get("tweets", None)
-    tweet_id = data.get("tweet_id", None)
-    if value and value.strip():
-        cleaned_tweet = _clean_text(value)
-    new_item.append({
-        "tweet_id": tweet_id,
-        "tweet": cleaned_tweet
-    })
 
-for data in tqdm(new_item):
+# for data in tqdm(loaded_data[:1200]):
+#     value = data.get("tweets", None)
+#     tweet_id = data.get("tweet_id", None)
+#     if value and value.strip():
+#         cleaned_tweet = _clean_text(value)
+#     new_item.append({
+#         "tweet_id": tweet_id,
+#         "tweet": cleaned_tweet
+#     })
+
+for data in tqdm(loaded_data):
     _model.process(data)
 
 if conn is not None:
